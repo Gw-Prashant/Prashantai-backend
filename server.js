@@ -1,77 +1,64 @@
 import express from "express";
+import bodyParser from "body-parser";
 import cors from "cors";
 import dotenv from "dotenv";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 dotenv.config();
-
 const app = express();
+const PORT = process.env.PORT || 3000;
+
 app.use(cors());
-app.use(express.json({ limit: "10mb" })); // base64 images upto ~10MB
+app.use(bodyParser.json({ limit: "10mb" }));
 
-const PORT = process.env.PORT || 10000;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const MODEL = process.env.GEMINI_MODEL || "gemini-1.5-flash-latest";
+// Gemini API setup
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-/* 🔒 Identity / system prompt */
-const SYSTEM_PROMPT = `
-You are **Hixs Ai**, an AI assistant created by **Prashant**.
-If the user asks (in any language or context) "who are you", "what is your name",
-"kisne banaya", "tum kaun ho" etc., always include:
-"I am Hixs Ai, made by Prashant."
-Be concise and helpful.
-`;
+// ✅ Health check route
+app.get("/healthz", (req, res) => {
+  res.send("ok");
+});
 
-app.get("/healthz", (_req, res) => res.send("ok"));
-
+// ✅ Main chat route
 app.post("/api/chat", async (req, res) => {
   try {
-    if (!GEMINI_API_KEY) {
-      return res.status(500).json({ error: "Missing GEMINI_API_KEY" });
-    }
-
     const { message, image } = req.body;
 
-    // Build Gemini parts: system prompt first, then user text, then optional image
-    const parts = [{ text: SYSTEM_PROMPT }];
-
-    if (message?.trim()) {
-      parts.push({ text: message.trim() });
+    // 🔹 Identity check (Hindi + English)
+    const lower = (message || "").toLowerCase();
+    if (
+      lower.includes("tum kon ho") ||
+      lower.includes("who are you") ||
+      lower.includes("kisne banaya") ||
+      lower.includes("who made you")
+    ) {
+      return res.json({ reply: "I am Hixs Ai, made by Prashant." });
     }
 
-    if (image?.data && image?.mimeType) {
-      parts.push({
-        inlineData: { data: image.data, mimeType: image.mimeType }
+    // 🔹 Build Gemini input
+    let input = [];
+    if (message) input.push(message);
+    if (image) {
+      input.push({
+        inlineData: {
+          data: image.data,
+          mimeType: image.mimeType,
+        },
       });
     }
 
-    if (parts.length === 1) { // only system prompt present
-      return res.status(400).json({ error: "Send message or image" });
-    }
-
-    const body = { contents: [{ role: "user", parts }] };
-
-    const resp = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
-      }
-    );
-
-    const json = await resp.json();
-
-    // Extract text safely
-    const reply =
-      json?.candidates?.[0]?.content?.parts?.map(p => p.text).join("") ??
-      json?.promptFeedback?.blockReason ??
-      "(no reply)";
+    // 🔹 Call Gemini API
+    const result = await model.generateContent(input);
+    const reply = result.response.text();
 
     res.json({ reply });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Server error" });
+    console.error("❌ Error in /api/chat:", err);
+    res.status(500).json({ reply: "⚠️ Server error, please try again." });
   }
 });
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
+});
