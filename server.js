@@ -1,65 +1,77 @@
-// server.js
 import express from "express";
-import bodyParser from "body-parser";
+import fetch from "node-fetch";
 import cors from "cors";
-import dotenv from "dotenv";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 
-dotenv.config();
 const app = express();
-const PORT = process.env.PORT || 3000;
-
 app.use(cors());
-app.use(bodyParser.json({ limit: "10mb" }));
+app.use(express.json({ limit: "10mb" }));
 
-// 🔹 Gemini setup
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// ✅ Health check (Render ke liye)
-app.get("/healthz", (req, res) => {
-  res.send("ok");
-});
+app.get("/healthz", (req, res) => res.send("ok"));
 
-// ✅ Chat endpoint
 app.post("/api/chat", async (req, res) => {
   try {
     const { message, image } = req.body;
 
-    // 🔹 Identity check
-    const lower = (message || "").toLowerCase();
-    if (
-      lower.includes("tum kon ho") ||
-      lower.includes("who are you") ||
-      lower.includes("kisne banaya") ||
-      lower.includes("who made you")
-    ) {
-      return res.json({ reply: "I am Hixs Ai, made by Prashant." });
+    if (!GEMINI_API_KEY) {
+      return res.status(500).json({ error: "❌ Missing Gemini API Key in server." });
     }
 
-    // 🔹 Gemini input banaye
-    const parts = [];
-    if (message) parts.push({ text: message });
+    // 👉 Identify wala check
+    const identifyKeywords = [
+      "tum kon ho",
+      "tum kaun ho",
+      "who are you",
+      "kisne banaya",
+      "who made you",
+      "what is your name"
+    ];
+
+    if (message) {
+      const lowerMsg = message.toLowerCase();
+      if (identifyKeywords.some(k => lowerMsg.includes(k))) {
+        return res.json({
+          reply: "Main Hixs Ai hoon 🤖, mujhe Prashant ne banaya hai 🙌."
+        });
+      }
+    }
+
+    const url =
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" +
+      GEMINI_API_KEY;
+
+    const contents = [{ role: "user", parts: [] }];
+    if (message) contents[0].parts.push({ text: message });
     if (image) {
-      parts.push({
-        inlineData: {
+      contents[0].parts.push({
+        inline_data: {
+          mime_type: image.mimeType,
           data: image.data,
-          mimeType: image.mimeType,
         },
       });
     }
 
-    // 🔹 Gemini se response
-    const result = await model.generateContent({ contents: [{ role: "user", parts }] });
-    const reply = result.response.text();
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contents }),
+    });
+
+    const data = await response.json();
+    if (data.error) {
+      return res.status(400).json({ error: data.error.message || "Gemini API error" });
+    }
+
+    const reply =
+      data.candidates?.[0]?.content?.parts?.[0]?.text || "⚠️ No reply from Gemini.";
 
     res.json({ reply });
   } catch (err) {
-    console.error("❌ API Error:", err);
-    res.status(500).json({ reply: "⚠️ Server error, please try again." });
+    console.error("API Error:", err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log("🚀 Server running on port " + PORT));
