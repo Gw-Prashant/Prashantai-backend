@@ -1,3 +1,4 @@
+// server.js
 import express from "express";
 import bodyParser from "body-parser";
 import cors from "cors";
@@ -11,21 +12,21 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(bodyParser.json({ limit: "10mb" }));
 
-// Gemini API setup
+// 🔹 Gemini setup
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-// ✅ Health check route
+// ✅ Health check (Render ke liye)
 app.get("/healthz", (req, res) => {
   res.send("ok");
 });
 
-// ✅ Main chat route
+// ✅ Chat endpoint
 app.post("/api/chat", async (req, res) => {
   try {
     const { message, image } = req.body;
 
-    // 🔹 Identity check (Hindi + English)
+    // 🔹 Identity check
     const lower = (message || "").toLowerCase();
     if (
       lower.includes("tum kon ho") ||
@@ -36,11 +37,11 @@ app.post("/api/chat", async (req, res) => {
       return res.json({ reply: "I am Hixs Ai, made by Prashant." });
     }
 
-    // 🔹 Build Gemini input
-    let input = [];
-    if (message) input.push(message);
+    // 🔹 Gemini input banaye
+    const parts = [];
+    if (message) parts.push({ text: message });
     if (image) {
-      input.push({
+      parts.push({
         inlineData: {
           data: image.data,
           mimeType: image.mimeType,
@@ -48,17 +49,17 @@ app.post("/api/chat", async (req, res) => {
       });
     }
 
-    // 🔹 Call Gemini API
-    const result = await model.generateContent(input);
+    // 🔹 Gemini se response
+    const result = await model.generateContent({ contents: [{ role: "user", parts }] });
     const reply = result.response.text();
 
     res.json({ reply });
   } catch (err) {
-    console.error("❌ Error in /api/chat:", err);
+    console.error("❌ API Error:", err);
     res.status(500).json({ reply: "⚠️ Server error, please try again." });
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
 });
